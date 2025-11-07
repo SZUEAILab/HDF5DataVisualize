@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HDF5文件查看器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root{
+            --szu-red: #c62828;      /* 荔枝红 */
+            --szu-blue: #1565c0;     /* 深蓝 */
+            --black: #000000;
+            --white: #ffffff;
+            --muted: #6c757d;
+            --panel-bg: rgba(255,255,255,0.96);
+            --line: #e5ecf6;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(180deg, var(--white) 0%, #f5f9ff 60%);
+            min-height: 100vh;
+            padding: 20px;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 100%;
+            margin: 0 auto;
+            height: calc(100vh - 100px);
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .file-panel {
+            flex: 0 0 500px;
+        }
+
+        .right-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            min-width: 0;
+        }
+
+        /* --- MODIFICATION START: 调整面板垂直比例 --- */
+        .video-panel {
+            flex: 7; /* 视频播放器在垂直方向上占据更多空间 (约70%) */
+            min-height: 0;
+        }
+
+        .model-settings-panel {
+            flex: 3; /* 模型设置在垂直方向上占据较少空间 (约30%) */
+            min-height: 0;
+        }
+        /* --- MODIFICATION END --- */
+
+        .panel-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 20px;
+            font-weight: 600;
+            color: #1f2a37;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--szu-blue);
+            flex-shrink: 0;
+        }
+
+        .app-header {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            margin: 0;
+            z-index: 1000;
+        }
+        .container {
+            padding-top: 72px;
+        }
+        .szu-logo{
+            width: 180px;
+            height: 55px;
+        }
+
+        .file-panel-content { display: flex; height: calc(100% - 60px); }
+        .quick-sidebar { flex: 0 0 auto; border-right: 2px solid var(--line); padding-right: 12px; margin-right: 12px; width: max-content; min-width: max-content; max-width: 240px; display: flex; flex-direction: column; }
+        .quick-sidebar-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--szu-blue); font-size: 16px; font-weight: 600; color: #1f2a37; white-space: nowrap; }
+        .quick-sidebar-list { overflow-y: auto; flex-grow: 1; }
+        .quick-sidebar-item { background: #f7f9fc; border: 2px solid transparent; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s ease; text-align: center; font-size: 12px; white-space: nowrap; }
+        .quick-sidebar-item:hover { background: #eef4ff; border-color: var(--szu-blue); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(21,101,192,0.12); }
+        .quick-sidebar-item.selected { background: var(--szu-blue); color: var(--white); border-color: var(--szu-blue); }
+        .quick-sidebar-name { font-weight: 600; margin-bottom: 2px; }
+        .quick-sidebar-count { font-size: 10px; opacity: 0.9; }
+        .file-sidebar { flex: 1; display: flex; flex-direction: column; }
+        .file-sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--szu-blue); }
+        .file-sidebar-title { font-size: 16px; font-weight: 600; color: #1f2a37; }
+        .current-folder { background: #fff3e8; border: 1px solid var(--szu-red); border-radius: 6px; padding: 4px 8px; font-size: 11px; display: none; color: #5a2a2a; }
+        .current-folder-label { font-weight: 600; color: var(--szu-red); margin-right: 4px; }
+        .current-folder-name { color: #5a2a2a; }
+        .file-sidebar-list { overflow-y: auto; flex-grow: 1; }
+        .file-sidebar-item { background: #f7f9fc; border: 2px solid transparent; border-radius: 8px; padding: 10px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s ease; }
+        .file-sidebar-item:hover { background: #eef4ff; border-color: var(--szu-blue); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(21,101,192,0.12); }
+        .file-sidebar-item.selected { background: var(--szu-blue); color: var(--white); border-color: var(--szu-blue); }
+        .file-sidebar-name { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+        .file-sidebar-size { font-size: 10px; color: var(--muted); }
+        .file-sidebar-item.selected .file-sidebar-size { color: var(--white); opacity: 0.9; }
+        .refresh-btn { background: var(--szu-red); color: var(--white); border: none; padding: 6px 12px; border-radius: 15px; cursor: pointer; font-size: 11px; margin-bottom: 10px; width: 100%; transition: all 0.2s ease; flex-shrink: 0; }
+        .refresh-btn:hover { background: #a61f1f; transform: translateY(-1px); }
+        .refresh-btn.large { padding: 8px 16px; font-size: 12px; margin-bottom: 12px; } /* 这个类现在不会被用到 */
+
+        .video-panel-content, .model-settings-content { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 14px; 
+            flex-grow: 1; 
+            min-height: 0; 
+        }
+        
+        .video-grid-container {
+            flex-grow: 1;
+            min-height: 0;
+            display: grid; 
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            justify-content: center;
+            align-items: center;
+            overflow: auto;
+        }
+
+        .video-player-item { display: flex; flex-direction: column; gap: 8px; background: #f0f4f8; border-radius: 10px; padding: 8px; border: 1px solid var(--line); }
+        .video-player-title { text-align: center; font-size: 12px; font-weight: 600; color: #333; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .video-image-wrapper { flex-grow: 1; display: flex; align-items: center; justify-content: center; min-height: 0; background-color: #000; border-radius: 5px; }
+        .video-image-wrapper img { width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        .video-controls {
+            padding-top: 10px;
+            border-top: 1px solid var(--line);
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            gap: 12px;
+            flex-shrink: 0; 
+        }
+        .control-btn {
+            background: var(--szu-blue);
+            color: var(--white);
+            border: none;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 5px 12px;
+            font-size: 12px;
+        }
+
+        .control-btn:hover { background: #0d47a1; transform: translateY(-1px); }
+        .control-btn:disabled { background: #98a2b3; cursor: not-allowed; transform: none; }
+        .progress-bar { width: 150px; height: 6px; background: #dbe7fb; border-radius: 3px; overflow: hidden; margin: 0 10px; }
+        .progress-fill { height: 100%; background: var(--szu-blue); width: 0%; transition: width 0.1s linear; }
+        #timeInfo { color: var(--muted); font-size: 12px; white-space: nowrap; }
+        .status-info { color: var(--muted); font-size: 12px; flex-shrink: 0; white-space: nowrap; margin-left: 10px; }
+        .loading { display: none; text-align: center; color: var(--szu-blue); }
+        .loading.show { display: block; }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid var(--szu-blue); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .empty-state { text-align: center; color: var(--muted); font-size: 14px; margin: 20px; position: center;}
+
+        .model-form-wrapper { 
+            background: #f8fbff; 
+            border: 1px solid var(--line); 
+            border-radius: 10px; 
+            padding: 12px; 
+            overflow: auto; 
+            flex-grow: 1;
+        }
+        .model-form-title{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--szu-blue); color: #1f2a37; font-weight: 600; }
+        .model-form{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; }
+        .form-group{ display: flex; flex-direction: column; gap: 6px; }
+        .form-group label{ font-size: 12px; color: #1f2a37; font-weight: 600; }
+        .form-group select, .form-group input[type="text"], .form-group input[type="number"]{ padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; outline: none; }
+        .form-group input[type="range"]{ width: 100%; }
+        .helper{ font-size: 11px; color: var(--muted); }
+        .form-actions{ grid-column: 1 / -1; display: flex; gap: 10px; margin-top: 6px; }
+        .btn{ border: none; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; transition: all 0.2s ease; }
+        .btn-primary{ background: var(--szu-blue); color: #fff; }
+        .btn-primary:hover{ background: #0d47a1; transform: translateY(-1px); }
+        .btn-secondary{ background: #e9eff8; color: #1f2a37; }
+        .btn-secondary:hover{ background: #dbe7fb; transform: translateY(-1px); }
+        .preview{ grid-column: 1 / -1; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; color: #111827; max-height: 120px; overflow: auto; }
+        
+        .rdt-btn { background-color: var(--szu-red); color: white; font-size: 12px; padding: 6px 12px; }
+        .rdt-btn:hover { background-color: #a61f1f; }
+        .rdt-btn:disabled { background-color: #98a2b3; cursor: not-allowed; transform: none; }
+        .rdt-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 2000; display: none; justify-content: center; align-items: center; }
+        .rdt-overlay.visible { display: flex; }
+        .rdt-overlay-content { background: var(--panel-bg); padding: 20px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 90%; max-width: 1200px; height: 90vh; display: flex; flex-direction: column; }
+        .rdt-overlay-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; margin-bottom: 15px; border-bottom: 2px solid var(--szu-red); }
+        .rdt-overlay-title { font-size: 18px; font-weight: 600; }
+        .rdt-close-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: #555; transition: color 0.2s; padding: 0 10px; }
+        .rdt-close-btn:hover { color: var(--szu-red); }
+        .rdt-video-container { flex-grow: 1; display: flex; gap: 20px; overflow: hidden; }
+        .rdt-video-wrapper { flex: 1; display: flex; flex-direction: column; gap: 8px; background: #e9eff8; border-radius: 10px; padding: 10px; }
+        .rdt-video-wrapper h3 { text-align: center; font-size: 14px; font-weight: 600; color: #333; }
+        .rdt-video-wrapper img { width: 100%; height: 100%; object-fit: contain; background-color: #000; border-radius: 5px; min-height: 0; }
+    </style>
+</head>
+<body>
+    <div class="app-header">
+        <img class="szu-logo" src="/materials/SZU_LOGO.png"/>
+    </div>
+    <div class="container">
+        <div class="file-panel panel">
+            <div class="panel-title">HDF5文件管理器</div>
+            <div class="file-panel-content">
+                <div class="quick-sidebar">
+                    <div class="quick-sidebar-title">数据库</div>
+                    <button class="refresh-btn" onclick="refreshQuickSidebar()">刷新</button>
+                    <div class="quick-sidebar-list" id="quickSidebarList"></div>
+                </div>
+                <div class="file-sidebar">
+                    <div class="file-sidebar-header">
+                        <div class="file-sidebar-title">文件列表</div>
+                        <div class="current-folder" id="currentFolderInfo">
+                            <span class="current-folder-label">当前:</span>
+                            <span class="current-folder-name" id="currentFolderName"></span>
+                        </div>
+                    </div>
+                    <button class="refresh-btn" onclick="refreshFileSidebar()">刷新文件列表</button>
+                    <div class="file-sidebar-list" id="fileSidebarList"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-column">
+            <div class="video-panel panel">
+                <div class="panel-title">
+                    <span>多视角播放器</span>
+                </div>
+                <div class="video-panel-content">
+                    <div class="video-grid-container" id="videoGridContainer">
+                        <div class="empty-state">请选择一个HDF5文件开始播放</div>
+                    </div>
+                    <div class="video-controls" id="videoControls" style="display: none;">
+                        <button class="control-btn" id="playBtn" onclick="togglePlay()">播放</button>
+                        <button class="control-btn" id="stopBtn" onclick="stopVideo()">重置</button>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span id="timeInfo">0.00s / 0.00s</span>
+                        <div class="status-info" id="statusInfo"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="model-settings-panel panel">
+                <div class="panel-title">
+                    <span>模型设置与控制</span>
+                    <button class="btn rdt-btn" id="runRdtBtn">启动RDT服务</button>
+                </div>
+                <div class="model-settings-content">
+                    <div class="model-form-wrapper">
+                        <div class="model-form-title">
+                            <span>模型参数</span>
+                            <span class="helper">仅前端预览</span>
+                        </div>
+                        <div class="model-form" id="modelForm">
+                            <div class="form-group">
+                                <label for="modelSelect">模型</label>
+                                <select id="modelSelect"><option value="baseline_v1">baseline_v1</option><option value="unet_small">unet_small</option><option value="unet_large">unet_large</option><option value="swin_transformer">swin_transformer</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="deviceSelect">设备</label>
+                                <select id="deviceSelect"><option value="cpu">CPU</option><option value="cuda:0">GPU 0</option><option value="cuda:1">GPU 1</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="batchSize">Batch Size</label>
+                                <input id="batchSize" type="number" min="1" max="128" step="1" value="8" />
+                            </div>
+                            <div class="form-group">
+                                <label for="frameStep">帧采样步长</label>
+                                <input id="frameStep" type="number" min="1" max="10" step="1" value="1" />
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label for="confThreshold">置信阈值：<span id="confVal">0.50</span></label>
+                                <input id="confThreshold" type="range" min="0" max="1" step="0.01" value="0.50" oninput="document.getElementById('confVal').textContent=this.value" />
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label for="iouThreshold">IoU阈值：<span id="iouVal">0.50</span></label>
+                                <input id="iouThreshold" type="range" min="0" max="1" step="0.01" value="0.50" oninput="document.getElementById('iouVal').textContent=this.value" />
+                            </div>
+                            <div class="form-actions" style="grid-column: 1 / -1;">
+                                <button class="btn btn-primary" onclick="submitModelConfig()">应用设置</button>
+                                <button class="btn btn-secondary" onclick="resetModelConfig()">重置</button>
+                            </div>
+                            <pre class="preview" id="modelConfigPreview" style="grid-column: 1 / -1;">{}</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="rdt-overlay" id="rdtOverlay">
+        </div>
+
+    <script>
+        // --- JavaScript (与上一个版本完全相同, 为了完整性而包含) ---
+        let cameraData = {}; 
+        let cameraNames = [];
+        let totalFrames = 0;
+        let currentIndex = 0;
+        let isPlaying = false;
+        let playInterval = null;
+        let selectedFile = null;
+        let selectedQuickFolder = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshQuickSidebar();
+            setupRdtControls(); 
+        });
+
+        async function refreshQuickSidebar() {
+            const list = document.getElementById('quickSidebarList');
+            list.innerHTML = '<div class="empty-state">加载中...</div>';
+            try {
+                const response = await fetch('/api/database_folders');
+                const folders = await response.json();
+                list.innerHTML = '';
+                if (folders.length === 0) { list.innerHTML = '<div class="empty-state">无database文件夹</div>'; return; }
+                folders.forEach(folder => {
+                    const item = document.createElement('div');
+                    item.className = 'quick-sidebar-item';
+                    item.onclick = () => selectQuickFolder(folder);
+                    item.innerHTML = `<div class="quick-sidebar-name">${folder.name}</div><div class="quick-sidebar-count">${folder.hdf5_count} 个</div>`;
+                    list.appendChild(item);
+                });
+                if (folders.length > 0) selectQuickFolder(folders[0]);
+            } catch (error) { list.innerHTML = '<div class="empty-state">加载失败</div>'; console.error('Error:', error); }
+        }
+        async function selectQuickFolder(folder) {
+            document.querySelectorAll('.quick-sidebar-item').forEach(item => item.classList.remove('selected'));
+            const clickedItem = Array.from(document.querySelectorAll('.quick-sidebar-item')).find(el => el.querySelector('.quick-sidebar-name').textContent === folder.name);
+            if (clickedItem) clickedItem.classList.add('selected');
+            selectedQuickFolder = folder;
+            document.getElementById('currentFolderInfo').style.display = 'flex';
+            document.getElementById('currentFolderName').textContent = folder.name;
+            await refreshFileSidebar();
+            document.getElementById('videoGridContainer').innerHTML = '<div class="empty-state">请选择一个HDF5文件开始播放</div>';
+            hideVideoControls();
+        }
+        async function refreshFileSidebar() {
+            if (!selectedQuickFolder) { document.getElementById('fileSidebarList').innerHTML = '<div class="empty-state">请先选择文件夹</div>'; return; }
+            const list = document.getElementById('fileSidebarList');
+            list.innerHTML = '<div class="empty-state">正在加载...</div>';
+            try {
+                const response = await fetch(`/api/database_files/${selectedQuickFolder.name}`);
+                const files = await response.json();
+                list.innerHTML = '';
+                if (files.length === 0) { list.innerHTML = '<div class="empty-state">该文件夹没有HDF5文件</div>'; return; }
+                files.forEach(file => {
+                    const item = document.createElement('div');
+                    item.className = 'file-sidebar-item';
+                    item.onclick = (event) => selectFileFromSidebar(file, event.currentTarget);
+                    item.innerHTML = `<div class="file-sidebar-name">${file.name}</div><div class="file-sidebar-size">${file.size}</div>`;
+                    list.appendChild(item);
+                });
+            } catch (error) { list.innerHTML = '<div class="empty-state">加载文件失败</div>'; console.error('Error:', error); }
+        }
+        function selectFileFromSidebar(file, element) {
+            document.querySelectorAll('.file-sidebar-item').forEach(item => item.classList.remove('selected'));
+            element.classList.add('selected');
+            selectFile(file);
+        }
+        async function selectFile(file) {
+            selectedFile = file;
+            stopVideo();
+            cameraData = {};
+            cameraNames = [];
+            totalFrames = 0;
+            const videoGrid = document.getElementById('videoGridContainer');
+            videoGrid.innerHTML = `<div class="loading show"><div class="spinner"></div><div>正在处理HDF5文件...</div></div>`;
+            videoGrid.style.display = 'flex';
+            hideVideoControls();
+            try {
+                const response = await fetch('/api/process_hdf5', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: file.path })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    cameraData = result.camera_images;
+                    cameraNames = result.camera_names;
+                    totalFrames = result.total_frames;
+                    if (totalFrames > 0 && cameraNames.length > 0) {
+                        setupVideoPlayers(videoGrid);
+                        displayImages(0);
+                        showVideoControls();
+                        updateStatusInfo(`视角: ${cameraNames.length} | 帧数: ${totalFrames}`);
+                    } else {
+                        videoGrid.style.display = 'grid';
+                        videoGrid.innerHTML = '<div class="empty-state">该文件没有找到有效的图像数据</div>';
+                    }
+                } else {
+                    videoGrid.style.display = 'grid';
+                    videoGrid.innerHTML = `<div class="empty-state">处理文件失败: ${result.error || ''}</div>`;
+                }
+            } catch (error) {
+                videoGrid.style.display = 'grid';
+                videoGrid.innerHTML = '<div class="empty-state">处理文件时发生错误</div>';
+                console.error('Error processing file:', error);
+            }
+        }
+        function setupVideoPlayers(container) {
+            container.innerHTML = ''; 
+            container.style.display = 'grid';
+            const columns = Math.min(cameraNames.length, 3);
+            container.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+            cameraNames.forEach(camName => {
+                const playerItem = document.createElement('div');
+                playerItem.className = 'video-player-item';
+                playerItem.innerHTML = `
+                    <div class="video-player-title">${camName}</div>
+                    <div class="video-image-wrapper">
+                        <img id="video-img-${camName}" src="" alt="${camName} view">
+                    </div>
+                `;
+                container.appendChild(playerItem);
+            });
+        }
+        function displayImages(index) {
+            if (index < 0 || index >= totalFrames) return;
+            currentIndex = index;
+            cameraNames.forEach(camName => {
+                const imgElement = document.getElementById(`video-img-${camName}`);
+                if (imgElement && cameraData[camName] && cameraData[camName][index]) {
+                    imgElement.src = cameraData[camName][index].data;
+                }
+            });
+            updateProgress();
+            updateTimeInfo();
+        }
+        function showVideoControls() { document.getElementById('videoControls').style.display = 'flex'; }
+        function hideVideoControls() { document.getElementById('videoControls').style.display = 'none'; }
+        function togglePlay() { if (isPlaying) { pauseVideo(); } else { playVideo(); } }
+        function playVideo() {
+            if (totalFrames === 0 || isPlaying) return;
+            isPlaying = true;
+            document.getElementById('playBtn').textContent = '暂停';
+            playInterval = setInterval(() => {
+                currentIndex++;
+                if (currentIndex >= totalFrames) { currentIndex = 0; }
+                displayImages(currentIndex);
+            }, 50);
+        }
+        function pauseVideo() {
+            isPlaying = false;
+            document.getElementById('playBtn').textContent = '播放';
+            if (playInterval) { clearInterval(playInterval); playInterval = null; }
+        }
+        function stopVideo() {
+            pauseVideo();
+            currentIndex = 0;
+            if (totalFrames > 0) { displayImages(0); }
+        }
+        function updateProgress() {
+            if (totalFrames <= 1) { document.getElementById('progressFill').style.width = '0%'; return; }
+            const progress = (currentIndex / (totalFrames - 1)) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+        }
+        function updateTimeInfo() {
+            if (totalFrames === 0) { document.getElementById('timeInfo').textContent = '0.00s / 0.00s'; return; }
+            const currentTime = (currentIndex * 0.05).toFixed(2);
+            const totalTime = ((totalFrames - 1) * 0.05).toFixed(2);
+            document.getElementById('timeInfo').textContent = `${currentTime}s / ${totalTime}s`;
+        }
+        function updateStatusInfo(message) { document.getElementById('statusInfo').textContent = message; }
+        function submitModelConfig(){
+            const cfg = { model: document.getElementById('modelSelect').value, device: document.getElementById('deviceSelect').value, batch_size: Number(document.getElementById('batchSize').value || 8), frame_step: Number(document.getElementById('frameStep').value || 1), conf_thres: Number(document.getElementById('confThreshold').value), iou_thres: Number(document.getElementById('iouThreshold').value), extra_args: parseJsonSafe(document.getElementById('extraArgs').value), tag: document.getElementById('tag').value || '', target_file: selectedFile ? selectedFile.path : null };
+            document.getElementById('modelConfigPreview').textContent = JSON.stringify(cfg, null, 2);
+        }
+        function resetModelConfig(){
+            document.getElementById('modelForm').reset();
+            document.getElementById('confVal').textContent = '0.50';
+            document.getElementById('iouVal').textContent = '0.50';
+            document.getElementById('modelConfigPreview').textContent = '{}';
+        }
+        function parseJsonSafe(text){
+            if(!text || !text.trim()) return {};
+            try{ return JSON.parse(text); }catch(e){ return { raw: text }; }
+        }
+        
+        function setupRdtControls() {
+            const runBtn = document.getElementById('runRdtBtn');
+            const closeBtn = document.getElementById('closeRdtBtn');
+            const overlay = document.getElementById('rdtOverlay');
+            const wristImg = document.getElementById('rdtWristCam');
+            const thirdImg = document.getElementById('rdtThirdCam');
+            const streamHost = `http://${window.location.hostname}:8080`;
+            runBtn.addEventListener('click', async () => {
+                runBtn.disabled = true;
+                runBtn.textContent = '启动中...';
+                try {
+                    const response = await fetch('/api/start_rdt_server', {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    if (response.ok && (result.status === 'started' || result.status === 'already_running')) {
+                        setTimeout(() => {
+                            wristImg.src = `${streamHost}/wrist?t=${new Date().getTime()}`;
+                            thirdImg.src = `${streamHost}/third?t=${new Date().getTime()}`;
+                            overlay.classList.add('visible');
+                        }, 1500);
+                        alert(result.message);
+                    } else {
+                        alert(`启动失败: ${result.message || '未知错误'}`);
+                    }
+                } catch (error) {
+                    alert('启动服务失败，请检查后端Flask服务的控制台日志。');
+                    console.error('Failed to start RDT server:', error);
+                } finally {
+                    runBtn.disabled = false;
+                    runBtn.textContent = '启动RDT服务';
+                }
+            });
+
+            closeBtn.addEventListener('click', async () => {
+                overlay.classList.remove('visible');
+                wristImg.src = '';
+                thirdImg.src = '';
+                try {
+                    const response = await fetch('/api/stop_rdt_server', { method: 'POST' });
+                    const result = await response.json();
+                    console.log('Stop server result:', result.message);
+                } catch (error) { console.error('Failed to stop RDT server:', error); }
+            });
+        }
+    </script>
+</body>
+</html>
