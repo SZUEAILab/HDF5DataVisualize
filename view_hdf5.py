@@ -287,6 +287,29 @@ def stop_rdt_server():
         return jsonify({'status': 'error', 'message': f'终止失败: {e}'}), 500
 
 # --- End of NEW API Endpoints ---
-
+def start_ngrok_tunnel():
+    """启动 ngrok 公网隧道"""
+    try:
+        # 连接隧道到 5000 端口
+        public_url = ngrok.connect(5000).public_url
+        print("\n" + "="*60)
+        print(f"🌐 Ngrok 隧道已启动!")
+        print(f"🔗 公网地址: {public_url}")
+        print(f"📤 上传接口: {public_url}/api/upload_chunk")
+        print(f"🔄 合并接口: {public_url}/api/merge_chunks")
+        print("="*60 + "\n")
+        
+        # 保存公网地址到文件
+        with open("public_url.txt", "w") as f:
+            f.write(f"服务器公网地址: {public_url}\n")
+            f.write(f"上传分块: POST {public_url}/api/upload_chunk\n")
+            f.write(f"合并文件: POST {public_url}/api/merge_chunks\n")
+        
+        return public_url
+    except Exception as e:
+        print(f"❌ 启动 ngrok 失败: {e}")
+        print("ℹ️  请检查: 1) 是否安装 pyngrok, 2) 网络连接")
+        return None
 if __name__ == '__main__':
+	start_ngrok_tunnel()
     app.run(debug=True, host='0.0.0.0', port=5000)
