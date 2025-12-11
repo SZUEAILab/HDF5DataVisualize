@@ -10,9 +10,18 @@ import json
 import subprocess # New import
 import atexit     # New import
 import signal     # New import
+import tempfile
+import hashlib
 
 
 app = Flask(__name__)
+UPLOAD_FOLDER = 'uploads'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Chunk upload state
+upload_chunks = {}
 
 # --- RDT Process Management ---
 rdt_process = None
@@ -287,29 +296,106 @@ def stop_rdt_server():
         return jsonify({'status': 'error', 'message': f'终止失败: {e}'}), 500
 
 # --- End of NEW API Endpoints ---
-def start_ngrok_tunnel():
-    """启动 ngrok 公网隧道"""
+
+# --- Upload APIs (migrated from receive_hdf5.py) ---
+@app.route('/api/upload_chunk', methods=['POST'])
+def upload_chunk():
+    """Receive one chunk of an HDF5 file."""
     try:
-        # 连接隧道到 5000 端口
-        public_url = ngrok.connect(5000).public_url
-        print("\n" + "="*60)
-        print(f"🌐 Ngrok 隧道已启动!")
-        print(f"🔗 公网地址: {public_url}")
-        print(f"📤 上传接口: {public_url}/api/upload_chunk")
-        print(f"🔄 合并接口: {public_url}/api/merge_chunks")
-        print("="*60 + "\n")
-        
-        # 保存公网地址到文件
-        with open("public_url.txt", "w") as f:
-            f.write(f"服务器公网地址: {public_url}\n")
-            f.write(f"上传分块: POST {public_url}/api/upload_chunk\n")
-            f.write(f"合并文件: POST {public_url}/api/merge_chunks\n")
-        
-        return public_url
+        if 'chunk' not in request.files:
+            return jsonify({'error': 'missing file chunk'}), 400
+
+        chunk_file = request.files['chunk']
+        file_md5 = request.form.get('file_md5')
+        filename = request.form.get('filename')
+        chunk_index = request.form.get('chunk_index')
+        total_chunks = request.form.get('total_chunks')
+
+        if chunk_index is None or total_chunks is None:
+            return jsonify({'error': 'missing chunk_index or total_chunks'}), 400
+
+        chunk_index = int(chunk_index)
+        total_chunks = int(total_chunks)
+
+        if not all([file_md5, filename]):
+            return jsonify({'error': 'missing file_md5 or filename'}), 400
+
+        # Create temp directory for this upload
+        temp_dir = os.path.join(tempfile.gettempdir(), 'hdf5_uploads', file_md5)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Save chunk
+        chunk_path = os.path.join(temp_dir, f'chunk_{chunk_index}')
+        chunk_file.save(chunk_path)
+
+        # Track upload progress
+        if file_md5 not in upload_chunks:
+            upload_chunks[file_md5] = {
+                'filename': filename,
+                'total_chunks': total_chunks,
+                'uploaded_chunks': set(),
+                'temp_dir': temp_dir
+            }
+
+        upload_chunks[file_md5]['uploaded_chunks'].add(chunk_index)
+
+        return jsonify({
+            'success': True,
+            'message': f'chunk {chunk_index} uploaded',
+            'uploaded_chunks': len(upload_chunks[file_md5]['uploaded_chunks']),
+            'total_chunks': total_chunks
+        })
+
     except Exception as e:
-        print(f"❌ 启动 ngrok 失败: {e}")
-        print("ℹ️  请检查: 1) 是否安装 pyngrok, 2) 网络连接")
-        return None
+        return jsonify({'error': f'upload chunk failed: {str(e)}'}), 500
+
+
+@app.route('/api/merge_chunks', methods=['POST'])
+def merge_chunks():
+    """Merge all uploaded chunks into a single HDF5 file."""
+    try:
+        data = request.get_json()
+        file_md5 = data.get('file_md5')
+        filename = data.get('filename')
+        total_chunks = data.get('total_chunks')
+
+        if file_md5 not in upload_chunks:
+            return jsonify({'error': 'file not found or expired'}), 404
+
+        chunk_info = upload_chunks[file_md5]
+
+        # Ensure all chunks are present
+        if len(chunk_info['uploaded_chunks']) != total_chunks:
+            return jsonify({
+                'error': f'incomplete chunks ({len(chunk_info["uploaded_chunks"])}/{total_chunks})'
+            }), 400
+
+        # Merge chunks
+        temp_dir = chunk_info['temp_dir']
+        final_filename = f"{hashlib.md5(filename.encode()).hexdigest()}_{filename}"
+        final_path = os.path.join('databases', 'uploaded_from_api', final_filename)
+        os.makedirs(os.path.dirname(final_path), exist_ok=True)
+
+        with open(final_path, 'wb') as output_file:
+            for i in range(total_chunks):
+                chunk_path = os.path.join(temp_dir, f'chunk_{i}')
+                with open(chunk_path, 'rb') as chunk_file:
+                    output_file.write(chunk_file.read())
+                os.remove(chunk_path)
+
+        os.rmdir(temp_dir)
+        del upload_chunks[file_md5]
+
+        return jsonify({
+            'success': True,
+            'message': 'file merged successfully',
+            'filename': final_filename,
+            'file_path': final_path
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'merge failed: {str(e)}'}), 500
+# --- End Upload APIs ---
+
 if __name__ == '__main__':
-	start_ngrok_tunnel()
     app.run(debug=True, host='0.0.0.0', port=5000)
