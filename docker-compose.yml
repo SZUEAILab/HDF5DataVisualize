@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  hdf5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: easyteleop/hdf5
+    container_name: easyteleop-hdf5
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./databases:/app/databases
+    restart: unless-stopped
